@@ -5,14 +5,23 @@ library(lubridate)
 library(ggplot2)
 library(FactoMineR)
 library(factoextra)
+library(readxl)
+
+
+liste <- get_dataset_list()
+
 
 #Données trimestrielles
 conj_ind <- get_insee_idbank("001585942", "010758406", "010758350", "001586762","001586739")
 conj_con <- get_insee_idbank("001586807", "001586918")
+act_emploi <- get_insee_idbank("010605834", "001688527")
 
-pivot_trim <- function(conj_ind) {
+
+
+pivot_trim <- function(conj_ind, freq = c("q", "y")) {
+  freq <- match.arg(freq)  # Ensure it's either "q" or "y"
   
-  # Pivote le df
+  # Pivot the dataframe
   conj_pivot <- conj_ind %>%
     select(DATE, TITLE_FR, OBS_VALUE) %>%
     pivot_wider(
@@ -21,8 +30,7 @@ pivot_trim <- function(conj_ind) {
     ) %>%
     arrange(DATE)
   
-  # Colonnes temp pour aggrégation
-  conj_quarterly <- conj_pivot %>%
+  conj_mutated <- conj_pivot %>%
     mutate(
       year = year(DATE),
       month = month(DATE),
@@ -32,23 +40,73 @@ pivot_trim <- function(conj_ind) {
         month %in% 7:9 ~ 7,
         month %in% 10:12 ~ 10
       ),
-      quarter_date = as.Date(paste0(year, "-", sprintf("%02d", quarter_month), "-01"))
+      quarter_date = as.Date(paste0(year, "-", sprintf("%02d", quarter_month), "-01")),
+      year_date = as.Date(paste0(year))
     )
   
-  # Aggrégation
-  conj_quarterly_avg <- conj_quarterly %>%
-    group_by(quarter_date) %>%
-    summarise(across(where(is.numeric), ~ mean(.x, na.rm = TRUE)), .groups = "drop") %>%
-    rename(DATE = quarter_date) %>%
+  # Aggregation
+  conj_aggregated <- conj_mutated %>%
+    group_by(period = if (freq == "q") quarter_date else year_date) %>%
+    summarise(
+      across(where(is.numeric), ~ mean(.x, na.rm = TRUE)),
+      .groups = "drop"
+    ) %>%
+    rename(DATE = period) %>%
     arrange(DATE)%>%
     select(-year, -month, -quarter_month)
   
-  return(conj_quarterly_avg)
+  return(conj_aggregated)
 }
 
+data_ind <- pivot_trim(conj_ind, freq = "q")
+data_con <- pivot_trim(conj_con, freq = "q")
+data_bit <- pivot_trim(act_emploi,freq = "y")
 
-data_ind <- pivot_trim(conj_ind)
-data_con <- pivot_trim(conj_con)
+
+
+
+
+
+
+act_emploi <- get_insee_idbank("010605834", "001688527")
+data_bit <- pivot_trim(act_emploi)
+
+comptes_emploi_durée <- read_excel("C:/Users/fauxa/OneDrive - Fédération Française du Bâtiment - On-premise/PIB potentiel/comptes_trim_recap_branches.xlsx",
+                             sheet = "CpteEmploiDurée", col_names = FALSE)
+
+
+emploi_durée <- comptes_emploi_durée %>%
+  select(dates = 1, `emploi physique` = 3, `heures emploi` = 153) %>%   
+  na.omit() %>%                                   
+  mutate(
+    year = substr(dates, 1, 4),
+    `emploi physique` = as.numeric(`emploi physique`),
+    `heures emploi` = as.numeric(`heures emploi`)
+  ) %>%
+  group_by(year) %>%
+  summarise(
+    emploi_physique = sum(`emploi physique`, na.rm = TRUE),
+    heures_emploi = sum(`heures emploi`, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
